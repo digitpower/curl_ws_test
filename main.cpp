@@ -6,7 +6,7 @@
 
 void startSendData(WsConnectionManager& connManager)
 {
-    int intervalBetweenPacketsSend = 500000; //50ms
+    int intervalBetweenPacketsSend = 1000000; //50ms
     for (size_t i = 0; i < 1000000; i++)
     {
         std::string s = std::to_string(i);
@@ -15,7 +15,9 @@ void startSendData(WsConnectionManager& connManager)
 
 
         //Send data
-        connManager.SendData(pchar, len);
+        char* dd = new char[len];
+        strncpy(dd, pchar, len);
+        connManager.SendData(dd, len, i);
 
         usleep(intervalBetweenPacketsSend);
     }
@@ -23,6 +25,7 @@ void startSendData(WsConnectionManager& connManager)
 
 int main(int argc, char **argv)
 {
-    WsConnectionManager connManager("ws://host.docker.internal:3000");
+    WsConnectionManager connManager;
+    connManager.StartSending("ws://host.docker.internal:3000");
     startSendData(connManager);
 }

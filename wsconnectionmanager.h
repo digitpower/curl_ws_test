@@ -3,8 +3,7 @@
 #include <map>
 #include <thread>
 #include <atomic>
-#include "reconnecttimer.h"
-
+#include "BlockingCollection.h"
 
 class WsConnectionManager
 {
@@ -17,17 +16,15 @@ public:
         RECONNECTED = 3
     };
 public:
-    WsConnectionManager(const char* wsUri);
+    WsConnectionManager();
     ~WsConnectionManager();
-    void SendData(char *data, int length);
+    void StartSending(const char* wssUri);
+    void SendData(char *data, int length, int sendDounter);
 private:
     void cacheDataLocally(char *data, int length);
     void removeDataFromCache(int index);
-    bool connectToServerIfNeeded();
-    void handleError(CURLcode code);
-    CURLcode connect();
-    void startReconnectTimer();
-    CURLcode sendData(char *data, int length);
+    CURLcode connect(const char* wssUri);
+    CURLcode sendData(char *data, int length, int counter);
     void closeGracefully() {}
 private:
     CURL* m_curl = nullptr;
@@ -36,10 +33,9 @@ private:
     struct DataForSend {
         char* data;
         int length;
+        int _cnt;
     };
     std::map<u_int64_t, DataForSend> m_waitingAnswerBuffer;
     int m_sendCounter = 0;
-    const char* m_wsUri = nullptr;
-    std::unique_ptr<Timer> m_reconnectTimer;
-    std::atomic<bool> m_connectToServerRequired = false;
+    code_machina::BlockingCollection<DataForSend> m_sendingPacketsBuffer;
 };
