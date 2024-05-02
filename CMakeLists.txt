@@ -26,6 +26,8 @@ link_directories(/usr/local/lib)
 add_executable(zoomsdk main.cpp
                        wsconnectionmanager.h
                        wsconnectionmanager.cpp
+                       packetscache.h
+                       packetscache.cpp
 )
 
 target_link_libraries(zoomsdk PRIVATE curl)

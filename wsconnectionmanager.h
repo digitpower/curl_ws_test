@@ -3,6 +3,8 @@
 #include <map>
 #include <thread>
 #include <atomic>
+#include "packetscache.h"
+#include "audiopacket.h"
 #include "BlockingCollection.h"
 
 class WsConnectionManager
@@ -21,7 +23,6 @@ public:
     void StartSending(const char* wssUri);
     void SendData(char *data, int length, int sendDounter);
 private:
-    void removeDataFromCache(int index);
     CURLcode connect(const char* wssUri);
     CURLcode sendData(char *data, int length, int counter);
     CURLcode receiveData(int sockfd, bool& timeOutDetectedOnReceive);
@@ -32,15 +33,8 @@ private:
     CURL* m_curl = nullptr;
     long m_sockfd = 0;
 
-    struct DataForSend {
-        char* data;
-        int length;
-        int _cnt;
-    };
     CURLcode handlePacketSendReceive(int sockfd, 
         DataForSend& dt,
         bool& connected);
-    void cacheDataLocally(DataForSend& dt);
-    std::map<u_int64_t, DataForSend> m_waitingAnswerBuffer;
-    code_machina::BlockingCollection<DataForSend> m_sendingPacketsBuffer;
+    PacketsCache m_sendingPacketsBuffer;
 };

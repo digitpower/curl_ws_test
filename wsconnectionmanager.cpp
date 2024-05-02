@@ -74,13 +74,11 @@ void WsConnectionManager::StartSending(const char* wssUri)
             
             while(connected == true)
             {
-                DataForSend dt;
-                auto status = m_sendingPacketsBuffer.take(dt);
-                if(status == code_machina::BlockingCollectionStatus::Ok)
-                {
-                    cacheDataLocally(dt);
-                    res = handlePacketSendReceive(sockfd, dt, connected);
-                }
+                auto sz = m_sendingPacketsBuffer.size();
+                DataForSend dt = m_sendingPacketsBuffer.front();
+                res = handlePacketSendReceive(sockfd, dt, connected);
+                if(res == CURLE_OK)
+                    m_sendingPacketsBuffer.removeFront();
             }
         }
     });
@@ -127,29 +125,13 @@ CURLcode WsConnectionManager::connect(const char* wssUri)
     return res;
 }
 
-void WsConnectionManager::cacheDataLocally(DataForSend& dt)
-{
-    printf("cacheDataLocally................. %d packet count: %ld\n", dt._cnt, m_sendingPacketsBuffer.size());
-    m_waitingAnswerBuffer.insert({dt._cnt, dt});
-}
-
-void WsConnectionManager::removeDataFromCache(int index)
-{
-    auto iter = m_waitingAnswerBuffer.find(index);
-    if(iter != m_waitingAnswerBuffer.end())
-    {
-        m_waitingAnswerBuffer.erase(iter);
-        printf("Remove data from cache****************** %d\n", index);
-    }
-}
-
 void WsConnectionManager::SendData(char *data, int length, int sendDounter)
 {
     DataForSend dt; 
     dt.data = data;
     dt.length = length;
     dt._cnt = sendDounter;
-    m_sendingPacketsBuffer.add(dt);
+    m_sendingPacketsBuffer.append(dt);
 }
 
 CURLcode WsConnectionManager::sendData(char *data, int length, int counter)
@@ -199,9 +181,7 @@ CURLcode WsConnectionManager::receiveData(int sockfd, bool& timeOutDetectedOnRec
         long index = strtol(buffer, &str, 10);
         if(index > 0)
         {
-            //As we definitely know that packet was received, remove it from cache
-            // std::cout << "Definitely sent " << index << " packet" << std::endl;
-            removeDataFromCache(index);
+            std::cout << "Definitely sent " << index << " packet" << std::endl;
         }
     }
 
