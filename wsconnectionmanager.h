@@ -25,8 +25,14 @@ private:
     void removeDataFromCache(int index);
     CURLcode connect(const char* wssUri);
     CURLcode sendData(char *data, int length, int counter);
+    CURLcode receiveData(int sockfd, bool& timeOutDetectedOnReceive);
+    CURLcode handlePacketSendReceive(int sockfd, 
+        char* data, 
+        int length, 
+        int counter,
+        bool& connected);
+    void cleanupConnection(bool& connected);
     void closeGracefully() {}
-    double waitForAnswer(int maxWait, int sockFd);
 private:
     CURL* m_curl = nullptr;
     long m_sockfd = 0;

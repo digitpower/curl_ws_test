@@ -7,6 +7,44 @@
 #include <chrono>
 #include "wsconnectionmanager.h"
 
+static int wait_on_socket(curl_socket_t sockfd, int for_recv, long timeout_ms)
+{
+  struct timeval tv;
+  fd_set infd, outfd, errfd;
+  int res;
+
+  tv.tv_sec = timeout_ms / 1000;
+  tv.tv_usec = (int)(timeout_ms % 1000) * 1000;
+
+  FD_ZERO(&infd);
+  FD_ZERO(&outfd);
+  FD_ZERO(&errfd);
+
+/* Avoid this warning with pre-2020 Cygwin/MSYS releases:
+ * warning: conversion to 'long unsigned int' from 'curl_socket_t' {aka 'int'}
+ * may change the sign of the result [-Wsign-conversion]
+ */
+#if defined(__GNUC__) && defined(__CYGWIN__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+  FD_SET(sockfd, &errfd); /* always check for error */
+
+  if(for_recv) {
+    FD_SET(sockfd, &infd);
+  }
+  else {
+    FD_SET(sockfd, &outfd);
+  }
+#if defined(__GNUC__) && defined(__CYGWIN__)
+#pragma GCC diagnostic pop
+#endif
+
+  /* select() returns the number of signalled sockets or -1 */
+  res = select((int)sockfd + 1, &infd, &outfd, &errfd, &tv);
+  return res;
+}
+
 WsConnectionManager::WsConnectionManager()
 {
 }
@@ -26,8 +64,7 @@ void WsConnectionManager::StartSending(const char* wssUri)
             if (res != CURLE_OK)
             {
                 // std::cout << "Connect failed. Packet count: " << m_sendingPacketsBuffer.size() << "\n";
-                curl_easy_cleanup(m_curl);
-                usleep(2000000);
+                cleanupConnection(connected);
                 continue;
             }
             connected = true;
@@ -43,29 +80,40 @@ void WsConnectionManager::StartSending(const char* wssUri)
                 cacheDataLocally(data, length);
                 if(status == code_machina::BlockingCollectionStatus::Ok)
                 {
-                    res = sendData(data, length, dt._cnt);
-                    if(res != CURLE_OK)
-                    {
-                        if(res != CURLE_AGAIN)
-                        {
-                            connected = false;
-                            curl_easy_cleanup(m_curl);
-                            usleep(2000000);
-                        }
-                        else
-                        {
-                            // while(CURLE_AGAIN == res)
-                            // {
-                                printf("CURLE_AGAIN detected for index %d\n", dt._cnt);
-                                // auto res = waitForAnswer(10000000, sockfd);
-                                // std::cout << "waited for " << res << " microseconds" << std::endl;
-                            // }
-                        }
-                    }
+                    int counter = dt._cnt;
+                    res = handlePacketSendReceive(sockfd, data, length, counter, connected);
                 }
             }
         }
     });
+}
+
+CURLcode WsConnectionManager::handlePacketSendReceive(int sockfd, 
+    char* data, 
+    int length, 
+    int counter,
+    bool& connected)
+{
+    auto res = sendData(data, length, counter);
+    if(res == CURLE_OK)
+    {
+        printf("sendData: %s %d ok!\n", data, counter);
+        bool timeoutDetected;
+        res = receiveData(sockfd, timeoutDetected);
+        if(timeoutDetected || CURLE_OK != res)
+            cleanupConnection(connected);
+        int a = 0;
+    }
+    else
+        cleanupConnection(connected);
+    return res;
+}
+
+void WsConnectionManager::cleanupConnection(bool& connected)
+{
+    connected = false;
+    curl_easy_cleanup(m_curl);
+    usleep(2000000);
 }
 
 // fprintf(stdout, "sent: %ld diff: %ld res: %d c: %d\n",
@@ -109,22 +157,45 @@ void WsConnectionManager::SendData(char *data, int length, int sendDounter)
 
 CURLcode WsConnectionManager::sendData(char *data, int length, int counter)
 {
-    printf("Sending: %s %d\n", data, counter);
     size_t sent;
     CURLcode res = curl_ws_send(m_curl, data, length, &sent, 0, CURLWS_BINARY);
-    if(res != CURLE_OK)
-        return res;
-    size_t rlen;
-    const struct curl_ws_frame *meta;
-    //We expect 4 byte int(counter) as answer
+    return res;
+}
+
+CURLcode WsConnectionManager::receiveData(int sockfd, bool& timeOutDetectedOnReceive)
+{
     char buffer[20] = {0};
-    res = curl_ws_recv(m_curl, buffer, sizeof(buffer), &rlen, &meta);
+    CURLcode res;
+    timeOutDetectedOnReceive = false; 
+    do {
+        size_t rlen;
+        const struct curl_ws_frame *meta;
+        res = curl_ws_recv(m_curl, buffer, sizeof(buffer), &rlen, &meta);
+
+        int for_receive = 1;
+        if(res == CURLE_AGAIN && !wait_on_socket(sockfd, for_receive, 60000L)) {
+          timeOutDetectedOnReceive = true;
+          break;
+        }
+    } while(res == CURLE_AGAIN);
+    
+    // while(CURLE_AGAIN == res)
+    // {
+    //     auto start = std::chrono::system_clock::now();
+    //     auto end = std::chrono::system_clock::now();
+    //     int readySockets = wait_on_socket(sockfd, 1, 60000L);
+    //     std::chrono::duration<double> diff = end - start;
+    //     printf("CURLE_AGAIN detected for index %d readySockets: %d timeout: %f microsecs\n", dt._cnt, readySockets, diff.count()*1'000'000);
+    // }
+
+
+
+
     if(res == CURLE_OK)
     {
-
+        //We expect 4 byte int(counter) as answer
         auto len = strlen(buffer);
         buffer[len - 2] = 0; //ignore last ok
-
 
         //Read data
         char *str;
@@ -138,26 +209,4 @@ CURLcode WsConnectionManager::sendData(char *data, int length, int counter)
     }
 
     return res;
-}
-
-double WsConnectionManager::waitForAnswer(int maxWait, int sockFd)
-{
-    fd_set readfds;
-    /* Extract the socket from the curl handle - we need it for waiting. */
-    FD_ZERO(&readfds); // Initialize the set
-    FD_SET(sockFd, &readfds); // Add sockfd to the set
-    // Set timeout for select (if desired)
-    struct timeval timeout;
-    timeout.tv_sec = 0; 
-    timeout.tv_usec = maxWait; // micro seconds
-
-    auto start = std::chrono::system_clock::now();
-    int ready = select(sockFd + 1, &readfds, NULL, NULL, &timeout);
-    //printf("CURLE_AGAIN detected for socket %d ready: %d\n", sockFd, ready);
-    // usleep(5000);
-    auto end = std::chrono::system_clock::now();
-    std::chrono::duration<double> diff = end - start;
-    // std::cout << "received content on " << sockFd << " after " << diff.count() *1000000 << "\n";
-
-    return diff.count() *1000000;
 }
