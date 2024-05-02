@@ -18,6 +18,7 @@ WsConnectionManager::~WsConnectionManager()
 void WsConnectionManager::StartSending(const char* wssUri)
 {
     new std::thread([=] {
+        curl_global_init(CURL_GLOBAL_ALL);
         bool connected = false;
         while(true)
         {
@@ -30,7 +31,8 @@ void WsConnectionManager::StartSending(const char* wssUri)
                 continue;
             }
             connected = true;
-
+            int sockfd = 0;
+            res = curl_easy_getinfo(m_curl, CURLINFO_ACTIVESOCKET, &sockfd);
             
             while(connected == true)
             {
@@ -52,7 +54,12 @@ void WsConnectionManager::StartSending(const char* wssUri)
                         }
                         else
                         {
-                            printf("CURLE_AGAIN detected for index %d\n", dt._cnt);
+                            // while(CURLE_AGAIN == res)
+                            // {
+                                printf("CURLE_AGAIN detected for index %d\n", dt._cnt);
+                                // auto res = waitForAnswer(10000000, sockfd);
+                                // std::cout << "waited for " << res << " microseconds" << std::endl;
+                            // }
                         }
                     }
                 }
@@ -131,4 +138,26 @@ CURLcode WsConnectionManager::sendData(char *data, int length, int counter)
     }
 
     return res;
+}
+
+double WsConnectionManager::waitForAnswer(int maxWait, int sockFd)
+{
+    fd_set readfds;
+    /* Extract the socket from the curl handle - we need it for waiting. */
+    FD_ZERO(&readfds); // Initialize the set
+    FD_SET(sockFd, &readfds); // Add sockfd to the set
+    // Set timeout for select (if desired)
+    struct timeval timeout;
+    timeout.tv_sec = 0; 
+    timeout.tv_usec = maxWait; // micro seconds
+
+    auto start = std::chrono::system_clock::now();
+    int ready = select(sockFd + 1, &readfds, NULL, NULL, &timeout);
+    //printf("CURLE_AGAIN detected for socket %d ready: %d\n", sockFd, ready);
+    // usleep(5000);
+    auto end = std::chrono::system_clock::now();
+    std::chrono::duration<double> diff = end - start;
+    // std::cout << "received content on " << sockFd << " after " << diff.count() *1000000 << "\n";
+
+    return diff.count() *1000000;
 }

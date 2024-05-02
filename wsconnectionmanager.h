@@ -26,6 +26,7 @@ private:
     CURLcode connect(const char* wssUri);
     CURLcode sendData(char *data, int length, int counter);
     void closeGracefully() {}
+    double waitForAnswer(int maxWait, int sockFd);
 private:
     CURL* m_curl = nullptr;
     long m_sockfd = 0;
