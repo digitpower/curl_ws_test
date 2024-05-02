@@ -21,16 +21,11 @@ public:
     void StartSending(const char* wssUri);
     void SendData(char *data, int length, int sendDounter);
 private:
-    void cacheDataLocally(char *data, int length);
     void removeDataFromCache(int index);
     CURLcode connect(const char* wssUri);
     CURLcode sendData(char *data, int length, int counter);
     CURLcode receiveData(int sockfd, bool& timeOutDetectedOnReceive);
-    CURLcode handlePacketSendReceive(int sockfd, 
-        char* data, 
-        int length, 
-        int counter,
-        bool& connected);
+
     void cleanupConnection(bool& connected);
     void closeGracefully() {}
 private:
@@ -42,7 +37,10 @@ private:
         int length;
         int _cnt;
     };
+    CURLcode handlePacketSendReceive(int sockfd, 
+        DataForSend& dt,
+        bool& connected);
+    void cacheDataLocally(DataForSend& dt);
     std::map<u_int64_t, DataForSend> m_waitingAnswerBuffer;
-    int m_sendCounter = 0;
     code_machina::BlockingCollection<DataForSend> m_sendingPacketsBuffer;
 };

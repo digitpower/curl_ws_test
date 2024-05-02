@@ -63,10 +63,11 @@ void WsConnectionManager::StartSending(const char* wssUri)
             auto res = connect(wssUri);
             if (res != CURLE_OK)
             {
-                // std::cout << "Connect failed. Packet count: " << m_sendingPacketsBuffer.size() << "\n";
+                printf("Connect failed. Packet count: %ld\n", m_sendingPacketsBuffer.size());
                 cleanupConnection(connected);
                 continue;
             }
+            // printf("Connected to server. Packet count: %ld\n", m_sendingPacketsBuffer.size());
             connected = true;
             int sockfd = 0;
             res = curl_easy_getinfo(m_curl, CURLINFO_ACTIVESOCKET, &sockfd);
@@ -75,13 +76,10 @@ void WsConnectionManager::StartSending(const char* wssUri)
             {
                 DataForSend dt;
                 auto status = m_sendingPacketsBuffer.take(dt);
-                char* data = dt.data; 
-                int length = dt.length;
-                cacheDataLocally(data, length);
                 if(status == code_machina::BlockingCollectionStatus::Ok)
                 {
-                    int counter = dt._cnt;
-                    res = handlePacketSendReceive(sockfd, data, length, counter, connected);
+                    cacheDataLocally(dt);
+                    res = handlePacketSendReceive(sockfd, dt, connected);
                 }
             }
         }
@@ -89,20 +87,17 @@ void WsConnectionManager::StartSending(const char* wssUri)
 }
 
 CURLcode WsConnectionManager::handlePacketSendReceive(int sockfd, 
-    char* data, 
-    int length, 
-    int counter,
+    DataForSend& dt,
     bool& connected)
 {
-    auto res = sendData(data, length, counter);
+    auto res = sendData(dt.data, dt.length, dt._cnt);
     if(res == CURLE_OK)
     {
-        printf("sendData: %s %d ok!\n", data, counter);
+        // printf("sendData: %s %d ok!\n", data, counter);
         bool timeoutDetected;
         res = receiveData(sockfd, timeoutDetected);
         if(timeoutDetected || CURLE_OK != res)
             cleanupConnection(connected);
-        int a = 0;
     }
     else
         cleanupConnection(connected);
@@ -132,18 +127,20 @@ CURLcode WsConnectionManager::connect(const char* wssUri)
     return res;
 }
 
-void WsConnectionManager::cacheDataLocally(char *data, int length)
+void WsConnectionManager::cacheDataLocally(DataForSend& dt)
 {
-    DataForSend dt{ data = data, length = length};
-    m_waitingAnswerBuffer.insert({m_sendCounter, dt});
-    m_sendCounter++;
+    printf("cacheDataLocally................. %d packet count: %ld\n", dt._cnt, m_sendingPacketsBuffer.size());
+    m_waitingAnswerBuffer.insert({dt._cnt, dt});
 }
 
 void WsConnectionManager::removeDataFromCache(int index)
 {
     auto iter = m_waitingAnswerBuffer.find(index);
     if(iter != m_waitingAnswerBuffer.end())
+    {
         m_waitingAnswerBuffer.erase(iter);
+        printf("Remove data from cache****************** %d\n", index);
+    }
 }
 
 void WsConnectionManager::SendData(char *data, int length, int sendDounter)
@@ -203,7 +200,7 @@ CURLcode WsConnectionManager::receiveData(int sockfd, bool& timeOutDetectedOnRec
         if(index > 0)
         {
             //As we definitely know that packet was received, remove it from cache
-            std::cout << "Definitely sent " << index << " packet" << std::endl;
+            // std::cout << "Definitely sent " << index << " packet" << std::endl;
             removeDataFromCache(index);
         }
     }
